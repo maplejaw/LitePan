@@ -7,6 +7,7 @@ export interface EmbyConfig {
   api_key: string;
   proxy_port: string;
   direct_strm_clients: string;
+  external_strm_patterns: string;
   proxy_url: string;
   running: boolean;
   last_error?: string;
@@ -19,6 +20,7 @@ export interface EmbyConfigUpdate {
   api_key: string;
   proxy_port: string;
   direct_strm_clients: string;
+  external_strm_patterns: string;
 }
 
 export interface EmbyConfigState {

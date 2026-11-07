@@ -470,3 +470,360 @@ func TestIsExpectedClientDisconnect(t *testing.T) {
 		t.Fatal("真实上游错误不应被当成客户端取消")
 	}
 }
+
+const testExternalSTRMURL = "http://192.168.50.8:8024/smartstrm_fid/xunlei/VP5jEX3Xz8EQxoUcOCGf8Gm6A1/%E7%95%AA%E5%89%A7/489155.com@MIDV-400-UC.mp4?sign=_I7Xy7xiWxXH4BsLOhf9DqCmkyvlns2X3x0V9vPFpw4="
+
+func externalSTRMItemServer(t *testing.T, externalURL string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/Items") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"Items":[{"Id":"123","MediaSources":[{"Id":"ms1","Path":%q}]}]}`, externalURL))
+	}))
+}
+
+func TestRedirectSTRMStreamRedirectsExternalSTRM(t *testing.T) {
+	upstream := externalSTRMItemServer(t, testExternalSTRMURL)
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	svc.servePlayback = func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
+		t.Fatal("外部 STRM 不应进入 LitePan playback")
+		return nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/123/stream?MediaSourceId=ms1&api_key=test-key", nil)
+	rec := httptest.NewRecorder()
+	svc.handle(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("状态码=%d，期望 302", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != testExternalSTRMURL {
+		t.Fatalf("Location=%q，期望 %q", got, testExternalSTRMURL)
+	}
+}
+
+func TestRedirectSTRMStreamExternalSTRMDirectClient(t *testing.T) {
+	upstream := externalSTRMItemServer(t, testExternalSTRMURL)
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	svc.servePlayback = func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
+		t.Fatal("直读客户端不应进入 LitePan playback")
+		return nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/123/stream?MediaSourceId=ms1", nil)
+	req.Header.Set("User-Agent", "Infuse/7.8")
+	rec := httptest.NewRecorder()
+	cfg := Config{ID: "default", EmbyURL: upstream.URL, APIKey: "test-key", DirectSTRMClients: "Infuse"}
+	svc.redirectSTRMStream(rec, req, cfg, "Videos/123/stream")
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("状态码=%d，期望 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if got, want := string(body), testExternalSTRMURL+"\n"; got != want {
+		t.Fatalf("STRM 文本=%q，期望 %q", got, want)
+	}
+	if got := resp.Header.Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Fatalf("Content-Type=%q，期望 text/plain", got)
+	}
+}
+
+func TestRedirectSTRMStreamExternalItemPathFallback(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/Items") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, fmt.Sprintf(`{"Items":[{"Id":"123","Path":%q}]}`, testExternalSTRMURL))
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	req := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/123/stream?MediaSourceId=ms1", nil)
+	rec := httptest.NewRecorder()
+	svc.handle(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("状态码=%d，期望 302", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != testExternalSTRMURL {
+		t.Fatalf("Location=%q", got)
+	}
+}
+
+func TestModifyPlaybackInfoExternalSTRM(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/Items/2257/PlaybackInfo"):
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"MediaSources":[{"Id":"mediasource_2257","Path":%q}]}`, testExternalSTRMURL))
+		case strings.HasSuffix(r.URL.Path, "/Items"):
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"Items":[{"Id":"2257","Path":%q,"MediaSources":[{"Id":"mediasource_2257","Path":%q}]}]}`, testExternalSTRMURL, testExternalSTRMURL))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	svc.servePlayback = func(w http.ResponseWriter, r *http.Request, req playback.Request, intent playback.Intent) error {
+		t.Fatal("外部 STRM 不应进入 LitePan playback")
+		return nil
+	}
+	cfg := Config{ID: "default", EmbyURL: upstream.URL, APIKey: "test-key"}
+	req := httptest.NewRequest(http.MethodPost, "http://litepan.test:8097/Items/2257/PlaybackInfo?api_key=test-key", nil)
+	rec := httptest.NewRecorder()
+	svc.modifyPlaybackInfo(rec, req, cfg, "Items/2257/PlaybackInfo")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PlaybackInfo 状态码=%d，响应=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		MediaSources []map[string]any `json:"MediaSources"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.MediaSources) != 1 {
+		t.Fatalf("MediaSources 数量=%d", len(payload.MediaSources))
+	}
+	mediaSource := payload.MediaSources[0]
+	if mediaSource["SupportsDirectPlay"] != true || mediaSource["SupportsDirectStream"] != true {
+		t.Fatalf("直连标记未写入: %#v", mediaSource)
+	}
+	if mediaSource["SupportsTranscoding"] != false {
+		t.Fatalf("转码标记未关闭: %#v", mediaSource)
+	}
+	directURL, _ := mediaSource["DirectStreamUrl"].(string)
+	if !strings.Contains(directURL, "/Videos/2257/stream") || !strings.Contains(directURL, "MediaSourceId=mediasource_2257") {
+		t.Fatalf("DirectStreamUrl=%q", directURL)
+	}
+	if mediaSource["Name"] != "489155.com@MIDV-400-UC.mp4" || mediaSource["Container"] != "mp4" {
+		t.Fatalf("外部元数据未补齐: %#v", mediaSource)
+	}
+	if _, ok := mediaSource["TranscodingUrl"]; ok {
+		t.Fatalf("TranscodingUrl 未删除: %#v", mediaSource)
+	}
+
+	streamReq := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/2257/stream?MediaSourceId=mediasource_2257&api_key=test-key", nil)
+	streamRec := httptest.NewRecorder()
+	svc.redirectSTRMStream(streamRec, streamReq, cfg, "Videos/2257/stream")
+	if streamRec.Code != http.StatusFound {
+		t.Fatalf("stream 状态码=%d，期望 302", streamRec.Code)
+	}
+	if got := streamRec.Header().Get("Location"); got != testExternalSTRMURL {
+		t.Fatalf("stream Location=%q", got)
+	}
+}
+
+func TestPlaybackInfoExternalKeepsExistingMediaInfo(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/Items/2257/PlaybackInfo"):
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"MediaSources":[{"Id":"mediasource_2257","Path":%q,"Name":"已有名称","Container":"mkv","Size":123}]}`, testExternalSTRMURL))
+		case strings.HasSuffix(r.URL.Path, "/Items"):
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"Items":[{"Id":"2257","Path":%q,"MediaSources":[{"Id":"mediasource_2257","Path":%q}]}]}`, testExternalSTRMURL, testExternalSTRMURL))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	cfg := Config{ID: "default", EmbyURL: upstream.URL, APIKey: "test-key"}
+	req := httptest.NewRequest(http.MethodPost, "http://litepan.test:8097/Items/2257/PlaybackInfo?api_key=test-key", nil)
+	rec := httptest.NewRecorder()
+	svc.modifyPlaybackInfo(rec, req, cfg, "Items/2257/PlaybackInfo")
+
+	var payload struct {
+		MediaSources []map[string]any `json:"MediaSources"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	mediaSource := payload.MediaSources[0]
+	if mediaSource["Name"] != "已有名称" || mediaSource["Container"] != "mkv" || mediaSource["Size"] != float64(123) {
+		t.Fatalf("已有媒体信息被覆盖: %#v", mediaSource)
+	}
+}
+
+func TestPlaybackInfoCacheKeepsSelectedExternalVersion(t *testing.T) {
+	firstURL := "http://192.168.50.8:8024/smartstrm_fid/xunlei/token-a/1080p.mp4?sign=a"
+	secondURL := "http://192.168.50.8:8024/smartstrm_fid/xunlei/token-b/2160p.mp4?sign=b"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/Items/2257/PlaybackInfo"):
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"MediaSources":[{"Id":"mediasource_2257","Path":%q},{"Id":"mediasource_2258","Path":%q}]}`, firstURL, secondURL))
+		case strings.HasSuffix(r.URL.Path, "/Items"):
+			// 模拟 Emby 合并版本时只返回主版本。
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"Items":[{"Id":"2257","Path":%q,"MediaSources":[{"Id":"mediasource_2257","Path":%q}]}]}`, firstURL, firstURL))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	cfg := Config{ID: "default", EmbyURL: upstream.URL, APIKey: "test-key"}
+	playbackReq := httptest.NewRequest(http.MethodPost, "http://litepan.test:8097/Items/2257/PlaybackInfo?api_key=test-key", nil)
+	playbackRec := httptest.NewRecorder()
+	svc.modifyPlaybackInfo(playbackRec, playbackReq, cfg, "Items/2257/PlaybackInfo")
+	if playbackRec.Code != http.StatusOK {
+		t.Fatalf("PlaybackInfo 状态码=%d", playbackRec.Code)
+	}
+
+	streamReq := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/2257/stream?MediaSourceId=mediasource_2258&api_key=test-key", nil)
+	streamRec := httptest.NewRecorder()
+	svc.redirectSTRMStream(streamRec, streamReq, cfg, "Videos/2257/stream")
+	if streamRec.Code != http.StatusFound {
+		t.Fatalf("stream 状态码=%d，期望 302", streamRec.Code)
+	}
+	if got := streamRec.Header().Get("Location"); got != secondURL {
+		t.Fatalf("Location=%q，期望第二版本 %q", got, secondURL)
+	}
+}
+
+func TestExternalSTRMPatterns(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		extra string
+		want  bool
+	}{
+		{name: "内置 SmartStrm", value: testExternalSTRMURL, want: true},
+		{name: "自定义路径前缀", value: "https://cdn.example/alist/a.mp4", extra: "/alist/", want: true},
+		{name: "完整地址前缀", value: "https://cdn.example/alist/a.mp4", extra: "https://cdn.example/alist/", want: true},
+		{name: "路径不匹配", value: "https://cdn.example/other/a.mp4", extra: "/alist/", want: false},
+		{name: "相对地址不匹配", value: "/smartstrm_fid/a.mp4", want: false},
+		{name: "边界不误伤", value: "https://cdn.example/smartstrm_other/a.mp4", extra: "/smartstrm", want: false},
+		{name: "大小写不敏感", value: "https://cdn.example/SMARTSTRM_FID/a.mp4", want: true},
+		{name: "不支持协议", value: "ftp://cdn.example/smartstrm_fid/a.mp4", want: false},
+		{name: "完整地址大小写", value: "https://CDN.example/alist/a.mp4", extra: "https://cdn.example/alist/", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, got := matchExternalSTRMPattern(tc.value, tc.extra)
+			if got != tc.want {
+				t.Fatalf("matchExternalSTRMPattern(%q, %q)=%v，期望 %v", tc.value, tc.extra, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeSTRMPatterns(t *testing.T) {
+	got, err := NormalizeSTRMPatterns(" /smartstrm_fid/ ; /alist/；; /a/ \n /a/ ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "/smartstrm_fid/;/alist/;/a/"; got != want {
+		t.Fatalf("规范化结果=%q，期望 %q", got, want)
+	}
+}
+
+func TestNormalizeSTRMPatternsRejectsInvalid(t *testing.T) {
+	for _, raw := range []string{"/", "http://", "https://", "ftp://host/x", "relative/path", "//host/x", "/a/?x=1", "/a/#f"} {
+		if _, err := NormalizeSTRMPatterns(raw); err == nil {
+			t.Fatalf("%q 应被拒绝", raw)
+		}
+	}
+	if got := sanitizeSTRMPatterns(" /smartstrm_fid/ ; / ; /alist/ "); got != "/smartstrm_fid/;/alist/" {
+		t.Fatalf("宽松清洗结果=%q", got)
+	}
+}
+
+func TestReplaceConfigsNormalizesExternalSTRMPatterns(t *testing.T) {
+	svc := testEmbyProxyService(t, "http://emby.test:8096")
+	state, err := svc.Replace(context.Background(), false, []UpdateRequest{{
+		Name: "主 Emby", EmbyURL: "http://primary.test:8096", APIKey: "secret",
+		ExternalSTRMPatterns: " /smartstrm_fid/ ; /alist/；/smartstrm_fid/ ",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := state.Items[0].ExternalSTRMPatterns, "/smartstrm_fid/;/alist/"; got != want {
+		t.Fatalf("返回配置前缀=%q，期望 %q", got, want)
+	}
+	raw, err := svc.resolveConfig(state.Items[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := raw.ExternalSTRMPatterns, "/smartstrm_fid/;/alist/"; got != want {
+		t.Fatalf("存储前缀=%q，期望 %q", got, want)
+	}
+
+	if _, err := svc.Replace(context.Background(), false, []UpdateRequest{{
+		Name: "主 Emby", EmbyURL: "http://primary.test:8096", APIKey: "secret",
+		ExternalSTRMPatterns: "/",
+	}}); err == nil {
+		t.Fatal("宽泛前缀 / 应被拒绝")
+	}
+}
+
+func TestRedirectSTRMStreamExternalRelativeURLIsNotRedirected(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/Items") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"Items":[{"Id":"123","MediaSources":[{"Id":"ms1","Path":"/smartstrm_fid/a.mp4"}]}]}`)
+			return
+		}
+		_, _ = io.WriteString(w, "upstream")
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	req := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/123/stream?MediaSourceId=ms1", nil)
+	rec := httptest.NewRecorder()
+	svc.handle(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "upstream" {
+		t.Fatalf("状态码=%d，响应=%q；相对地址应透传", resp.StatusCode, string(body))
+	}
+	if got := resp.Header.Get("Location"); got != "" {
+		t.Fatalf("相对地址不应重定向，Location=%q", got)
+	}
+}
+
+func TestRedirectSTRMStreamExternalSelfHostIsNotRedirected(t *testing.T) {
+	selfURL := "http://litepan.test:8097/smartstrm_fid/a.mp4"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/Items") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"Items":[{"Id":"123","MediaSources":[{"Id":"ms1","Path":%q}]}]}`, selfURL))
+			return
+		}
+		_, _ = io.WriteString(w, "upstream")
+	}))
+	defer upstream.Close()
+
+	svc := testEmbyProxyService(t, upstream.URL)
+	req := httptest.NewRequest(http.MethodGet, "http://litepan.test:8097/Videos/123/stream?MediaSourceId=ms1", nil)
+	rec := httptest.NewRecorder()
+	svc.handle(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "upstream" {
+		t.Fatalf("状态码=%d，响应=%q；指向自身的地址应透传", resp.StatusCode, string(body))
+	}
+	if got := resp.Header.Get("Location"); got != "" {
+		t.Fatalf("自身地址不应重定向，Location=%q", got)
+	}
+}

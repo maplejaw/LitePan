@@ -49,6 +49,9 @@ var (
 	htmlCrossOriginRE    = regexp.MustCompile(`mediaSource\.IsRemote\s*&&\s*(?:"DirectPlay"\s*===\s*playMethod|playMethod\s*===\s*"DirectPlay")\s*\?\s*null\s*:\s*"anonymous"`)
 )
 
+// defaultExternalSTRMPatterns 是内置识别的第三方 STRM 路径前缀；配置里的前缀是追加。
+var defaultExternalSTRMPatterns = []string{"/smartstrm_fid/"}
+
 type Service struct {
 	settings *settings.Service
 	playback *playback.Service
@@ -87,27 +90,31 @@ type Config struct {
 	APIKey            string `json:"api_key"`
 	Port              string `json:"proxy_port"`
 	DirectSTRMClients string `json:"direct_strm_clients"`
-	ProxyURL          string `json:"proxy_url"`
-	Running           bool   `json:"running"`
-	LastError         string `json:"last_error,omitempty"`
+	// ExternalSTRMPatterns 是追加识别的第三方 STRM 前缀，分号分隔；内置 /smartstrm_fid/。
+	ExternalSTRMPatterns string `json:"external_strm_patterns"`
+	ProxyURL             string `json:"proxy_url"`
+	Running              bool   `json:"running"`
+	LastError            string `json:"last_error,omitempty"`
 }
 
 type storedConfig struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	EmbyURL           string `json:"emby_url"`
-	APIKey            string `json:"api_key"`
-	Port              string `json:"proxy_port"`
-	DirectSTRMClients string `json:"direct_strm_clients,omitempty"`
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	EmbyURL              string `json:"emby_url"`
+	APIKey               string `json:"api_key"`
+	Port                 string `json:"proxy_port"`
+	DirectSTRMClients    string `json:"direct_strm_clients,omitempty"`
+	ExternalSTRMPatterns string `json:"external_strm_patterns,omitempty"`
 }
 
 type UpdateRequest struct {
-	ID                string                   `json:"id"`
-	Name              string                   `json:"name"`
-	EmbyURL           string                   `json:"emby_url"`
-	APIKey            string                   `json:"api_key"`
-	Port              jsonvalue.FlexibleString `json:"proxy_port"`
-	DirectSTRMClients string                   `json:"direct_strm_clients"`
+	ID                   string                   `json:"id"`
+	Name                 string                   `json:"name"`
+	EmbyURL              string                   `json:"emby_url"`
+	APIKey               string                   `json:"api_key"`
+	Port                 jsonvalue.FlexibleString `json:"proxy_port"`
+	DirectSTRMClients    string                   `json:"direct_strm_clients"`
+	ExternalSTRMPatterns string                   `json:"external_strm_patterns"`
 }
 
 type State struct {
@@ -259,7 +266,8 @@ func storedConfigs(configs []Config) []storedConfig {
 	for _, cfg := range configs {
 		out = append(out, storedConfig{
 			ID: cfg.ID, Name: cfg.Name, EmbyURL: cfg.EmbyURL, APIKey: cfg.APIKey, Port: cfg.Port,
-			DirectSTRMClients: cfg.DirectSTRMClients,
+			DirectSTRMClients:    cfg.DirectSTRMClients,
+			ExternalSTRMPatterns: cfg.ExternalSTRMPatterns,
 		})
 	}
 	return out
@@ -561,13 +569,18 @@ func ConfigFromUpdate(in UpdateRequest) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	patterns, err := NormalizeSTRMPatterns(in.ExternalSTRMPatterns)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
-		ID:                strings.TrimSpace(in.ID),
-		Name:              name,
-		EmbyURL:           embyURL,
-		APIKey:            strings.TrimSpace(in.APIKey),
-		Port:              port,
-		DirectSTRMClients: proxybase.NormalizeClientKeywords(in.DirectSTRMClients),
+		ID:                   strings.TrimSpace(in.ID),
+		Name:                 name,
+		EmbyURL:              embyURL,
+		APIKey:               strings.TrimSpace(in.APIKey),
+		Port:                 port,
+		DirectSTRMClients:    proxybase.NormalizeClientKeywords(in.DirectSTRMClients),
+		ExternalSTRMPatterns: patterns,
 	}, nil
 }
 
@@ -705,6 +718,7 @@ func (s *Service) configsFromSettings() []Config {
 		configs[i].APIKey = strings.TrimSpace(configs[i].APIKey)
 		configs[i].Port = strings.TrimSpace(configs[i].Port)
 		configs[i].DirectSTRMClients = proxybase.NormalizeClientKeywords(configs[i].DirectSTRMClients)
+		configs[i].ExternalSTRMPatterns = sanitizeSTRMPatterns(configs[i].ExternalSTRMPatterns)
 	}
 	return configs
 }
@@ -916,7 +930,7 @@ func embyMediaSourceCacheKey(cfg Config, mediaSourceID string) string {
 }
 
 func (s *Service) rememberMediaSource(cfg Config, itemID, mediaSourceID, playURL string) {
-	if strings.TrimSpace(mediaSourceID) == "" || !isLitePanSTRMURL(playURL) {
+	if strings.TrimSpace(mediaSourceID) == "" || !isSupportedSTRMURL(playURL, cfg) {
 		return
 	}
 	now := time.Now()
@@ -995,21 +1009,10 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 		return
 	}
 	if cachedURL := s.lookupMediaSource(cfg, itemID, mediaSourceID); cachedURL != "" {
-		ref, parsed := proxybase.ParseLitePanSTRMReference(cachedURL)
-		s.log.Debug("Emby/Jellyfin 反代命中 PlaybackInfo 版本缓存",
-			"item_id", itemID,
-			"requested_media_source_id", mediaSourceID,
-			"account_id", ref.AccountID,
-			"file_id", ref.FileID,
-			"path_based", ref.PathBased,
-			"litepan_url_parsed", parsed,
-		)
-		if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
-			proxybase.ServeSTRMDescriptor(w, r, cachedURL)
-			return
-		}
-		if s.serveLitePanPlayback(w, r, cachedURL) {
-			return
+		if match := s.matchSTRM(cachedURL, r, cfg); match.URL != "" {
+			if s.serveSTRMMatch(mediaSourceID, itemID, "cache", w, r, cfg, match) {
+				return
+			}
 		}
 	}
 	item := s.fetchEmbyItem(r.Context(), cfg, itemID)
@@ -1026,46 +1029,75 @@ func (s *Service) redirectSTRMStream(w http.ResponseWriter, r *http.Request, cfg
 		if current != "" && current != target {
 			continue
 		}
-		if redirectURL := s.extractLitePanSTRM(mediaSource, r, cfg); redirectURL != "" {
-			ref, parsed := proxybase.ParseLitePanSTRMReference(redirectURL)
-			s.log.Debug("Emby/Jellyfin 反代命中多版本媒体源",
-				"item_id", itemID,
-				"requested_media_source_id", mediaSourceID,
-				"matched_media_source_id", stringValue(mediaSource, "Id", "ID"),
-				"account_id", ref.AccountID,
-				"file_id", ref.FileID,
-				"path_based", ref.PathBased,
-				"litepan_url_parsed", parsed,
-			)
-			if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
-				proxybase.ServeSTRMDescriptor(w, r, redirectURL)
-				return
-			}
-			if s.serveLitePanPlayback(w, r, redirectURL) {
+		if match := s.extractSTRM(mediaSource, r, cfg); match.URL != "" {
+			if s.serveSTRMMatch(mediaSourceID, itemID, "media_source", w, r, cfg, match) {
 				return
 			}
 		}
 	}
-	itemPath := normalizeMediaURL(stringValue(item, "Path"), r, cfg)
-	if isLitePanSTRMURL(itemPath) {
-		ref, parsed := proxybase.ParseLitePanSTRMReference(itemPath)
-		s.log.Debug("Emby/Jellyfin 反代多版本未命中，回退影片公共路径",
-			"item_id", itemID,
-			"requested_media_source_id", mediaSourceID,
-			"account_id", ref.AccountID,
-			"file_id", ref.FileID,
-			"path_based", ref.PathBased,
-			"litepan_url_parsed", parsed,
-		)
-		if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
-			proxybase.ServeSTRMDescriptor(w, r, itemPath)
-			return
-		}
-		if s.serveLitePanPlayback(w, r, itemPath) {
+	if match := s.matchSTRM(stringValue(item, "Path"), r, cfg); match.URL != "" {
+		if s.serveSTRMMatch(mediaSourceID, itemID, "item_path", w, r, cfg, match) {
 			return
 		}
 	}
 	s.proxyRequest(w, r, cfg, fullPath)
+}
+
+// serveSTRMMatch 处理已经分类的可播放地址；返回 true 表示响应已写出。
+// 外部 STRM 只做描述符或 302，不经过 LitePan 播放层。
+func (s *Service) serveSTRMMatch(mediaSourceID, itemID, resolvedFrom string, w http.ResponseWriter, r *http.Request, cfg Config, match strmMatch) bool {
+	if match.External {
+		host := ""
+		if u, err := url.Parse(match.URL); err == nil {
+			host = u.Host
+		}
+		s.log.Debug("Emby/Jellyfin 反代命中外部 STRM",
+			"item_id", itemID,
+			"requested_media_source_id", mediaSourceID,
+			"resolved_from", resolvedFrom,
+			"prefix", match.Prefix,
+			"target_host", host,
+		)
+		if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
+			proxybase.ServeSTRMDescriptor(w, r, match.URL)
+			return true
+		}
+		return s.serveExternalSTRM(w, r, cfg, match.URL)
+	}
+	ref, parsed := proxybase.ParseLitePanSTRMReference(match.URL)
+	s.log.Debug("Emby/Jellyfin 反代命中 LitePan STRM",
+		"item_id", itemID,
+		"requested_media_source_id", mediaSourceID,
+		"resolved_from", resolvedFrom,
+		"account_id", ref.AccountID,
+		"file_id", ref.FileID,
+		"path_based", ref.PathBased,
+		"litepan_url_parsed", parsed,
+	)
+	if proxybase.MatchesClientKeywords(r, cfg.DirectSTRMClients) {
+		proxybase.ServeSTRMDescriptor(w, r, match.URL)
+		return true
+	}
+	return s.serveLitePanPlayback(w, r, match.URL)
+}
+
+// serveExternalSTRM 把外部 STRM 地址 302 给播放器；不代取任何字节。
+func (s *Service) serveExternalSTRM(w http.ResponseWriter, r *http.Request, cfg Config, raw string) bool {
+	target, err := url.Parse(proxybase.CleanWrappedURL(raw))
+	if err != nil || target.Host == "" {
+		return false
+	}
+	scheme := strings.ToLower(target.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return false
+	}
+	if isSelfHostURL(raw, r, cfg) {
+		return false
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Location", target.String())
+	w.WriteHeader(http.StatusFound)
+	return true
 }
 
 func (s *Service) modifyPlaybackInfo(w http.ResponseWriter, r *http.Request, cfg Config, fullPath string) {
@@ -1093,35 +1125,50 @@ func (s *Service) modifyPlaybackInfo(w http.ResponseWriter, r *http.Request, cfg
 	for _, mediaSource := range mediaSources(payload) {
 		mediaSourceID := stringValue(mediaSource, "Id", "ID")
 		itemMediaSource := findMediaSourceByID(item, mediaSourceID)
-		litepanURL := s.extractLitePanSTRM(mediaSource, r, cfg)
+		match := s.extractSTRM(mediaSource, r, cfg)
 		resolvedFrom := "playback_info"
-		if litepanURL == "" && itemMediaSource != nil {
-			litepanURL = s.extractLitePanSTRM(itemMediaSource, r, cfg)
+		if match.URL == "" && itemMediaSource != nil {
+			match = s.extractSTRM(itemMediaSource, r, cfg)
 			resolvedFrom = "item_media_source"
 		}
-		itemPath := normalizeMediaURL(stringValue(item, "Path"), r, cfg)
-		if litepanURL == "" && isLitePanSTRMURL(itemPath) {
-			litepanURL = itemPath
-			resolvedFrom = "item_path_fallback"
+		if match.URL == "" {
+			match = s.matchSTRM(stringValue(item, "Path"), r, cfg)
+			if match.URL != "" {
+				resolvedFrom = "item_path_fallback"
+			}
 		}
-		if litepanURL == "" {
-			s.log.Debug("Emby/Jellyfin 反代 PlaybackInfo 未找到 LitePan STRM",
+		if match.URL == "" {
+			s.log.Debug("Emby/Jellyfin 反代 PlaybackInfo 未找到可播放 STRM",
 				"item_id", itemID,
 				"media_source_id", mediaSourceID,
 			)
 			continue
 		}
-		ref, parsed := proxybase.ParseLitePanSTRMReference(litepanURL)
-		s.log.Debug("Emby/Jellyfin 反代 PlaybackInfo 版本映射",
-			"item_id", itemID,
-			"media_source_id", mediaSourceID,
-			"resolved_from", resolvedFrom,
-			"account_id", ref.AccountID,
-			"file_id", ref.FileID,
-			"path_based", ref.PathBased,
-			"litepan_url_parsed", parsed,
-		)
-		s.rememberMediaSource(cfg, itemID, mediaSourceID, litepanURL)
+		if match.External {
+			host := ""
+			if u, err := url.Parse(match.URL); err == nil {
+				host = u.Host
+			}
+			s.log.Debug("Emby/Jellyfin 反代 PlaybackInfo 外部 STRM 映射",
+				"item_id", itemID,
+				"media_source_id", mediaSourceID,
+				"resolved_from", resolvedFrom,
+				"prefix", match.Prefix,
+				"target_host", host,
+			)
+		} else {
+			ref, parsed := proxybase.ParseLitePanSTRMReference(match.URL)
+			s.log.Debug("Emby/Jellyfin 反代 PlaybackInfo 版本映射",
+				"item_id", itemID,
+				"media_source_id", mediaSourceID,
+				"resolved_from", resolvedFrom,
+				"account_id", ref.AccountID,
+				"file_id", ref.FileID,
+				"path_based", ref.PathBased,
+				"litepan_url_parsed", parsed,
+			)
+		}
+		s.rememberMediaSource(cfg, itemID, mediaSourceID, match.URL)
 		directPath := proxiedVideoPath(r, cfg, strutil.FirstNonEmpty(itemID, stripMediaSourcePrefix(mediaSourceID)), mediaSourceID)
 		mediaSource["SupportsDirectPlay"] = true
 		mediaSource["SupportsDirectStream"] = true
@@ -1133,7 +1180,9 @@ func (s *Service) modifyPlaybackInfo(w http.ResponseWriter, r *http.Request, cfg
 		delete(mediaSource, "TranscodingContainer")
 		delete(mediaSource, "TranscodingLiveStartIndex")
 		delete(mediaSource, "TrancodeLiveStartIndex")
-		if info := s.inferLitePanMediaInfo(r.Context(), litepanURL, r.UserAgent()); info != nil {
+		if match.External {
+			mergeMissingMediaInfo(mediaSource, inferExternalMediaInfo(match.URL))
+		} else if info := s.inferLitePanMediaInfo(r.Context(), match.URL, r.UserAgent()); info != nil {
 			for k, v := range info {
 				mediaSource[k] = v
 			}
@@ -1279,14 +1328,35 @@ func (s *Service) fetchEmbyItem(ctx context.Context, cfg Config, itemID string) 
 	return nil
 }
 
-func (s *Service) extractLitePanSTRM(mediaSource map[string]any, r *http.Request, cfg Config) string {
+type strmMatch struct {
+	URL      string
+	External bool
+	Prefix   string
+}
+
+// matchSTRM 在原值上分类：LitePan 优先，外部前缀次之；相对地址不参与外部识别。
+func (s *Service) matchSTRM(raw string, r *http.Request, cfg Config) strmMatch {
+	value := proxybase.CleanWrappedURL(raw)
+	if value == "" {
+		return strmMatch{}
+	}
+	if isLitePanSTRMURL(value) {
+		return strmMatch{URL: normalizeMediaURL(value, r, cfg)}
+	}
+	prefix, ok := matchExternalSTRMPattern(value, cfg.ExternalSTRMPatterns)
+	if !ok || isSelfHostURL(value, r, cfg) {
+		return strmMatch{}
+	}
+	return strmMatch{URL: value, External: true, Prefix: prefix}
+}
+
+func (s *Service) extractSTRM(mediaSource map[string]any, r *http.Request, cfg Config) strmMatch {
 	for _, key := range []string{"Path", "DirectStreamUrl", "DirectStreamURL", "TranscodingUrl"} {
-		value := normalizeMediaURL(stringValue(mediaSource, key), r, cfg)
-		if isLitePanSTRMURL(value) {
-			return value
+		if match := s.matchSTRM(stringValue(mediaSource, key), r, cfg); match.URL != "" {
+			return match
 		}
 	}
-	return ""
+	return strmMatch{}
 }
 
 func (s *Service) inferLitePanMediaInfo(ctx context.Context, litepanURL, ua string) map[string]any {
@@ -1320,6 +1390,42 @@ func (s *Service) inferLitePanMediaInfo(ctx context.Context, litepanURL, ua stri
 		out["Size"] = size
 	}
 	return out
+}
+
+// inferExternalMediaInfo 从外部 STRM URL 的路径推断文件名与容器；不推测大小。
+func inferExternalMediaInfo(raw string) map[string]any {
+	u, err := url.Parse(proxybase.CleanWrappedURL(raw))
+	if err != nil || u.Path == "" || strings.HasSuffix(u.Path, "/") {
+		return nil
+	}
+	name := path.Base(u.Path)
+	if decoded, decodeErr := url.PathUnescape(name); decodeErr == nil {
+		name = decoded
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == "/" {
+		return nil
+	}
+	out := map[string]any{"Name": name}
+	if ext := strings.TrimPrefix(strings.ToLower(path.Ext(name)), "."); ext != "" {
+		out["Container"] = ext
+	}
+	return out
+}
+
+func mergeMissingMediaInfo(mediaSource map[string]any, info map[string]any) {
+	for key, value := range info {
+		if isEmptyMediaValue(mediaSource[key]) {
+			mediaSource[key] = value
+		}
+	}
+}
+
+func isEmptyMediaValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	return strings.TrimSpace(fmt.Sprint(value)) == ""
 }
 
 func targetURL(cfg Config, fullPath, rawQuery string) (string, error) {
@@ -1416,6 +1522,184 @@ func normalizeMediaURL(candidate string, r *http.Request, cfg Config) string {
 func isLitePanSTRMURL(value string) bool {
 	pathValue := strings.ToLower(proxybase.LitePanPath(value))
 	return strings.HasPrefix(pathValue, "/api/strm/play/") || strings.HasPrefix(pathValue, "/api/strm/path/")
+}
+
+func isSupportedSTRMURL(value string, cfg Config) bool {
+	if isLitePanSTRMURL(value) {
+		return true
+	}
+	_, ok := matchExternalSTRMPattern(value, cfg.ExternalSTRMPatterns)
+	return ok
+}
+
+// matchExternalSTRMPattern 判断绝对 http(s) 地址是否命中内置或配置的外部 STRM 前缀。
+func matchExternalSTRMPattern(value, extra string) (string, bool) {
+	u, err := url.Parse(proxybase.CleanWrappedURL(value))
+	if err != nil || u.Host == "" {
+		return "", false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", false
+	}
+	for _, pattern := range defaultExternalSTRMPatterns {
+		if matchSTRMPattern(u, pattern) {
+			return pattern, true
+		}
+	}
+	for _, pattern := range rawSTRMPatterns(extra) {
+		if matchSTRMPattern(u, pattern) {
+			return pattern, true
+		}
+	}
+	return "", false
+}
+
+func matchSTRMPattern(u *url.URL, pattern string) bool {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" || pattern == "/" || pattern == "http://" || pattern == "https://" || strings.ContainsAny(pattern, "?#") {
+		return false
+	}
+	if strings.Contains(pattern, "://") {
+		pu, err := url.Parse(pattern)
+		if err != nil || pu.Host == "" {
+			return false
+		}
+		scheme := strings.ToLower(pu.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return false
+		}
+		if !strings.EqualFold(u.Scheme, pu.Scheme) || !strings.EqualFold(u.Host, pu.Host) {
+			return false
+		}
+		return matchPathPrefix(u, pu.Path)
+	}
+	return matchPathPrefix(u, pattern)
+}
+
+func matchPathPrefix(u *url.URL, prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	decodedPrefix, err := url.PathUnescape(prefix)
+	if err != nil {
+		decodedPrefix = prefix
+	}
+	return hasPathPrefix(u.Path, decodedPrefix) || hasPathPrefix(u.EscapedPath(), prefix)
+}
+
+func hasPathPrefix(candidate, prefix string) bool {
+	if len(candidate) < len(prefix) {
+		return false
+	}
+	if !strings.EqualFold(candidate[:len(prefix)], prefix) {
+		return false
+	}
+	if len(candidate) == len(prefix) {
+		return true
+	}
+	if strings.HasSuffix(prefix, "/") {
+		return true
+	}
+	return candidate[len(prefix)] == '/'
+}
+
+func isSelfHostURL(raw string, r *http.Request, cfg Config) bool {
+	u, err := url.Parse(proxybase.CleanWrappedURL(raw))
+	if err != nil || u.Host == "" {
+		return false
+	}
+	base, err := url.Parse(proxybase.PublicBase(r, cfg.Port))
+	if err != nil || base.Host == "" {
+		return false
+	}
+	if !strings.EqualFold(u.Scheme, base.Scheme) || !strings.EqualFold(u.Hostname(), base.Hostname()) {
+		return false
+	}
+	return hostPort(u) == hostPort(base)
+}
+
+func hostPort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return "443"
+	}
+	return "80"
+}
+
+func rawSTRMPatterns(raw string) []string {
+	out := make([]string, 0)
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ';' || r == '；' || r == '\n' || r == '\r'
+	}) {
+		pattern := strings.TrimSpace(proxybase.CleanWrappedURL(part))
+		if pattern == "" || strings.HasPrefix(pattern, "#") {
+			continue
+		}
+		out = append(out, pattern)
+	}
+	return out
+}
+
+func dedupeSTRMPatterns(patterns []string) []string {
+	seen := make(map[string]struct{}, len(patterns))
+	out := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		key := strings.ToLower(pattern)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, pattern)
+	}
+	return out
+}
+
+// NormalizeSTRMPatterns 校验并规范化外部 STRM 前缀，输出以分号分隔。
+func NormalizeSTRMPatterns(raw string) (string, error) {
+	patterns := rawSTRMPatterns(raw)
+	for _, pattern := range patterns {
+		if err := validateSTRMPattern(pattern); err != nil {
+			return "", err
+		}
+	}
+	return strings.Join(dedupeSTRMPatterns(patterns), ";"), nil
+}
+
+// sanitizeSTRMPatterns 宽松版：丢弃已存配置里的非法项，供读取时使用。
+func sanitizeSTRMPatterns(raw string) string {
+	valid := make([]string, 0)
+	for _, pattern := range rawSTRMPatterns(raw) {
+		if validateSTRMPattern(pattern) == nil {
+			valid = append(valid, pattern)
+		}
+	}
+	return strings.Join(dedupeSTRMPatterns(valid), ";")
+}
+
+func validateSTRMPattern(pattern string) error {
+	if pattern == "/" || pattern == "http://" || pattern == "https://" {
+		return domain.Errorf(domain.CodeValidation, "外部 STRM 前缀过于宽泛：%s", pattern)
+	}
+	if strings.ContainsAny(pattern, "?#") {
+		return domain.Errorf(domain.CodeValidation, "外部 STRM 前缀不能包含查询参数或片段：%s", pattern)
+	}
+	if strings.Contains(pattern, "://") {
+		u, err := url.Parse(pattern)
+		if err != nil || u.Host == "" || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") {
+			return domain.Errorf(domain.CodeValidation, "外部 STRM 完整地址前缀格式不正确：%s", pattern)
+		}
+		return nil
+	}
+	if strings.HasPrefix(pattern, "//") {
+		return domain.Errorf(domain.CodeValidation, "外部 STRM 前缀请写成 http(s):// 完整地址：%s", pattern)
+	}
+	if !strings.HasPrefix(pattern, "/") {
+		return domain.Errorf(domain.CodeValidation, "外部 STRM 前缀必须以 / 开头，或写成 http(s):// 完整地址：%s", pattern)
+	}
+	return nil
 }
 
 func responseHeaders(src http.Header) http.Header {

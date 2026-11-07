@@ -39,6 +39,7 @@ function emptyEmbyDraft(name = "") {
     api_key: "",
     proxy_port: "",
     direct_strm_clients: "",
+    external_strm_patterns: "",
   };
 }
 
@@ -88,7 +89,14 @@ const embyFields: ProxyField[] = [
     label: "STRM 直读客户端",
     placeholder: "默认留空",
     helpTitle: "STRM 直读客户端说明",
-    helpBody: "一般无需填写。播放器无法通过反代播放 STRM 时，可让它自己读取 STRM 中的地址。<br>填写客户端关键字，多个用分号隔开，例如 <code>XXXPlay;YYYPlayer</code>；未匹配的播放器仍由 LitePan 代取地址，填错了反而播不了。<br>外网播放时，请确保 STRM 的 URL 基础地址可从外网访问。",
+    helpBody: "一般无需填写。播放器无法通过反代播放 STRM 时，可让它自己读取 STRM 中的地址。<br>填写客户端关键字，多个用分号隔开，例如 <code>XXXPlay;YYYPlayer</code>；未匹配的播放器仍由反代处理（LitePan 代取或外部地址 302），填错了反而播不了。<br>外网播放时，请确保 STRM 的 URL 基础地址可从外网访问。",
+  },
+  {
+    key: "external_strm_patterns",
+    label: "外部 STRM 前缀",
+    placeholder: "默认内置 /smartstrm_fid/",
+    helpTitle: "外部 STRM 前缀说明",
+    helpBody: "SmartStrm 的 <code>/smartstrm_fid/</code> 已内置，无需填写。<br>其他工具可填写路径前缀（以 <code>/</code> 开头）或完整地址前缀（<code>http(s)://…</code>），多个用分号隔开。<br>只识别绝对地址；命中后反代会 302 到该地址。",
   },
 ];
 
@@ -110,6 +118,7 @@ function loadEmbyDraft(config: EmbyConfig) {
     api_key: config.api_key,
     proxy_port: String(config.proxy_port || ""),
     direct_strm_clients: config.direct_strm_clients || "",
+    external_strm_patterns: config.external_strm_patterns || "",
   });
 }
 
@@ -133,6 +142,7 @@ function updatesFromConfigs(configs: EmbyConfig[]): EmbyConfigUpdate[] {
     api_key: item.api_key,
     proxy_port: String(item.proxy_port || ""),
     direct_strm_clients: item.direct_strm_clients || "",
+    external_strm_patterns: item.external_strm_patterns || "",
   }));
 }
 
@@ -164,6 +174,7 @@ async function saveEmby() {
     api_key: embyDraft.api_key,
     proxy_port: embyDraft.proxy_port,
     direct_strm_clients: embyDraft.direct_strm_clients,
+    external_strm_patterns: embyDraft.external_strm_patterns,
   };
   const editing = embyConfigs.value.find((item) => item.id === embySelectedID.value);
   if (editing) {
@@ -194,6 +205,7 @@ async function testEmby() {
       api_key: embyDraft.api_key,
       proxy_port: embyDraft.proxy_port,
       direct_strm_clients: embyDraft.direct_strm_clients,
+      external_strm_patterns: embyDraft.external_strm_patterns,
     });
     toast.success("Emby/Jellyfin 连接成功");
   } catch (error) {
