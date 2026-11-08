@@ -263,6 +263,46 @@ func TestScanClassifiesExistingAlias(t *testing.T) {
 	}
 }
 
+func TestCleanupFindsNestedManifests(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "tasks", "movie")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(nested, "movie.srt"), "subtitle")
+	writeFile(t, filepath.Join(nested, "movie - 4K.strm"), "http://example/4k")
+
+	ctx := context.Background()
+	svc := New(Options{Mode: ModeHardlink, Fallback: true})
+	plan, err := svc.Scan(ctx, nested, ScanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Apply(ctx, plan); err != nil {
+		t.Fatal(err)
+	}
+
+	alias := filepath.Join(nested, "movie - 4K.srt")
+	if _, err := os.Stat(alias); err != nil {
+		t.Fatalf("别名未创建: %v", err)
+	}
+
+	// 从上层目录清理，应当发现子目录里的清单。
+	result, err := svc.Cleanup(ctx, root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(alias); !os.IsNotExist(err) {
+		t.Fatalf("嵌套清单中的别名未被清理: %v", err)
+	}
+	if len(result.Actions) != 1 || result.Actions[0].Status != "done" {
+		t.Fatalf("清理结果异常: %+v", result.Actions)
+	}
+	if _, err := os.Stat(filepath.Join(nested, "movie.srt")); err != nil {
+		t.Fatalf("源字幕被误删: %v", err)
+	}
+}
+
 func TestValidateActionRejectsEscapes(t *testing.T) {
 	root := filepath.FromSlash("/media")
 	ok := &Action{

@@ -345,82 +345,93 @@ func (s *Service) Apply(ctx context.Context, plan *Plan) error {
 // Cleanup 按清单清理本工具创建的别名。dryRun=true 时只检查不删除，等价于校验。
 func (s *Service) Cleanup(ctx context.Context, root string, dryRun bool) (*Plan, error) {
 	root = filepath.Clean(root)
-	manifest, err := readManifest(root)
+	refs, err := findManifests(root)
 	if err != nil {
-		return nil, fmt.Errorf("读取清单失败: %w", err)
+		return nil, fmt.Errorf("查找清单失败: %w", err)
 	}
 
 	plan := newPlan(root)
-	kept := make([]ManifestEntry, 0, len(manifest.Entries))
-
-	for i, e := range manifest.Entries {
-		if cerr := ctx.Err(); cerr != nil {
-			return nil, cerr
-		}
-		aliasAbs := filepath.Join(root, e.Alias)
-		sourceAbs := filepath.Join(root, e.Source)
-		act := Action{
-			ID:     fmt.Sprintf("c%d", i+1),
-			Dir:    filepath.Dir(e.Alias),
-			Source: filepath.Base(e.Source),
-			Alias:  filepath.Base(e.Alias),
-			Mode:   e.Mode,
-		}
-
-		if _, statErr := os.Stat(aliasAbs); errors.Is(statErr, fs.ErrNotExist) {
-			act.Kind = KindSkip
-			act.Reason = "别名已不存在，从清单移除"
-			plan.Actions = append(plan.Actions, act)
-			continue
-		}
-
-		if _, statErr := os.Stat(sourceAbs); statErr != nil {
-			act.Kind = KindKeep
-			act.Reason = "源字幕不存在，保留别名"
-			kept = append(kept, e)
-			plan.Actions = append(plan.Actions, act)
-			continue
-		}
-
-		keepReason := ""
-		if e.Mode == ModeHardlink {
-			if !sameFile(sourceAbs, aliasAbs) {
-				keepReason = "别名已不是源字幕的硬链接（可能被替换），保留"
+	seq := 0
+	for _, ref := range refs {
+		kept := make([]ManifestEntry, 0, len(ref.M.Entries))
+		for _, e := range ref.M.Entries {
+			if cerr := ctx.Err(); cerr != nil {
+				return nil, cerr
 			}
-		} else if !filesEqual(sourceAbs, aliasAbs) {
-			keepReason = "别名内容已被修改，保留"
-		}
-		if keepReason != "" {
-			act.Kind = KindKeep
-			act.Reason = keepReason
-			kept = append(kept, e)
+			seq++
+			aliasAbs := filepath.Join(ref.Dir, e.Alias)
+			sourceAbs := filepath.Join(ref.Dir, e.Source)
+			act := Action{
+				ID:     fmt.Sprintf("c%d", seq),
+				Dir:    displayDir(root, ref.Dir),
+				Source: filepath.Base(e.Source),
+				Alias:  filepath.Base(e.Alias),
+				Mode:   e.Mode,
+			}
+
+			if _, statErr := os.Stat(aliasAbs); errors.Is(statErr, fs.ErrNotExist) {
+				act.Kind = KindSkip
+				act.Reason = "别名已不存在，从清单移除"
+				plan.Actions = append(plan.Actions, act)
+				continue
+			}
+
+			if _, statErr := os.Stat(sourceAbs); statErr != nil {
+				act.Kind = KindKeep
+				act.Reason = "源字幕不存在，保留别名"
+				kept = append(kept, e)
+				plan.Actions = append(plan.Actions, act)
+				continue
+			}
+
+			keepReason := ""
+			if e.Mode == ModeHardlink {
+				if !sameFile(sourceAbs, aliasAbs) {
+					keepReason = "别名已不是源字幕的硬链接（可能被替换），保留"
+				}
+			} else if !filesEqual(sourceAbs, aliasAbs) {
+				keepReason = "别名内容已被修改，保留"
+			}
+			if keepReason != "" {
+				act.Kind = KindKeep
+				act.Reason = keepReason
+				kept = append(kept, e)
+				plan.Actions = append(plan.Actions, act)
+				continue
+			}
+
+			act.Kind = KindRemove
+			if dryRun {
+				act.Status = "pending"
+				act.Reason = "校验通过，待删除"
+			} else if removeErr := os.Remove(aliasAbs); removeErr != nil {
+				act.Kind = KindError
+				act.Status = "failed"
+				act.Error = removeErr.Error()
+				kept = append(kept, e)
+			} else {
+				act.Status = "done"
+				act.Reason = "已删除"
+			}
 			plan.Actions = append(plan.Actions, act)
-			continue
 		}
-
-		act.Kind = KindRemove
-		if dryRun {
-			act.Status = "pending"
-			act.Reason = "校验通过，待删除"
-		} else if removeErr := os.Remove(aliasAbs); removeErr != nil {
-			act.Kind = KindError
-			act.Status = "failed"
-			act.Error = removeErr.Error()
-			kept = append(kept, e)
-		} else {
-			act.Status = "done"
-			act.Reason = "已删除"
-		}
-		plan.Actions = append(plan.Actions, act)
-	}
-
-	if !dryRun {
-		manifest.Entries = kept
-		if err := writeManifest(root, manifest); err != nil {
-			return plan, err
+		if !dryRun {
+			ref.M.Entries = kept
+			if werr := writeManifest(ref.Dir, ref.M); werr != nil {
+				return plan, werr
+			}
 		}
 	}
 	return plan, nil
+}
+
+// displayDir 把清单所在目录转成相对用户所选根目录的展示路径。
+func displayDir(root, dir string) string {
+	rel, err := filepath.Rel(root, dir)
+	if err != nil || rel == "." {
+		return ""
+	}
+	return rel
 }
 
 func newPlan(root string) *Plan {

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // manifestName 放在扫描根目录下，随媒体目录一起移动。
@@ -31,7 +32,11 @@ func manifestPath(root string) string {
 }
 
 func readManifest(root string) (*Manifest, error) {
-	data, err := os.ReadFile(manifestPath(root))
+	return readManifestAt(manifestPath(root))
+}
+
+func readManifestAt(path string) (*Manifest, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return &Manifest{Version: 1, Entries: []ManifestEntry{}}, nil
@@ -46,6 +51,42 @@ func readManifest(root string) (*Manifest, error) {
 		m.Entries = []ManifestEntry{}
 	}
 	return &m, nil
+}
+
+// manifestRef 是一份清单及其所在目录。
+type manifestRef struct {
+	Dir string
+	M   *Manifest
+}
+
+// findManifests 递归查找目录树中的清单。
+// 自动对齐按任务输出目录写入清单，清理时只读根目录会漏掉子目录里的记录。
+func findManifests(root string) ([]manifestRef, error) {
+	var out []manifestRef
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if path != root && (strings.HasPrefix(d.Name(), ".") || skipDirNames[d.Name()]) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != manifestName {
+			return nil
+		}
+		m, readErr := readManifestAt(path)
+		if readErr != nil {
+			return nil
+		}
+		out = append(out, manifestRef{Dir: filepath.Dir(path), M: m})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func writeManifest(root string, m *Manifest) error {

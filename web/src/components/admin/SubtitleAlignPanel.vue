@@ -235,6 +235,10 @@ async function validate() {
   try {
     cleanupPlan.value = await cleanupSubtitleAlign(target, true);
     plan.value = null;
+    if (!cleanupPlan.value.actions.length) {
+      toast.info("没有找到本工具创建的别名清单");
+      return;
+    }
     const removable = cleanupPlan.value.actions.filter((a) => a.kind === "remove").length;
     toast.info(`校验完成：${removable} 个别名可安全清理`);
   } catch (e) {
@@ -256,7 +260,13 @@ async function cleanup() {
     plan.value = null;
     const removed = cleanupPlan.value.actions.filter((a) => a.status === "done").length;
     const kept = cleanupPlan.value.actions.filter((a) => a.kind === "keep").length;
-    toast.success(`已清理 ${removed} 个别名${kept ? `，保留 ${kept} 个` : ""}`);
+    if (!cleanupPlan.value.actions.length) {
+      toast.info("没有找到本工具创建的别名清单");
+    } else if (removed === 0) {
+      toast.info(kept ? `没有可删除的别名，保留 ${kept} 个` : "没有可删除的别名");
+    } else {
+      toast.success(`已清理 ${removed} 个别名${kept ? `，保留 ${kept} 个` : ""}`);
+    }
   } catch (e) {
     toast.error(getApiErrorMessage(e, "清理失败"));
   } finally {
