@@ -217,6 +217,7 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
   SECURITY_TAB,
   [SECURITY_TAB, HOMEPAGE_TAB, SERVICE_TAB, API_KEYS_TAB],
   {
+    pageKey: "settings",
     beforeTabChange: async (from, to) => {
       if (props.forcePasswordChange && to !== SECURITY_TAB) return false;
       if (!isTabDirty(from)) return true;

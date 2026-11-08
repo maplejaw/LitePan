@@ -177,14 +177,16 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
   STRM_TAB,
   [STRM_TAB, CACHE_TAB, ORGANIZE_TAB, AUTOMATION_TAB],
   {
-  beforeTabChange: async (_from, _to) => {
-    if (!settingsDrawerOpen.value) return true;
-    const ok = await confirmDiscardChanges(() => drawerDirty.value);
-    if (!ok) return false;
-    settingsDrawerOpen.value = false;
-    return true;
+    pageKey: "tasks",
+    beforeTabChange: async (_from, _to) => {
+      if (!settingsDrawerOpen.value) return true;
+      const ok = await confirmDiscardChanges(() => drawerDirty.value);
+      if (!ok) return false;
+      settingsDrawerOpen.value = false;
+      return true;
+    },
   },
-});
+);
 useAdminPageLoading(
   "tasks",
   computed(() => activeTab.value === STRM_TAB && (!strmListReady.value || refreshing.value) && !tasks.value.length),

@@ -22,7 +22,7 @@ const tabs = [
   { key: RAPID_TAB, label: "跨盘秒传" },
 ];
 
-const { activeTab, setActiveTab } = useSectionTabRoute(PLAIN_TAB, [PLAIN_TAB, RAPID_TAB]);
+const { activeTab, setActiveTab } = useSectionTabRoute(PLAIN_TAB, [PLAIN_TAB, RAPID_TAB], { pageKey: "cross-transfer" });
 
 // 秒传子组件实例：用于调用其矩阵弹层
 const rapidViewRef = ref<{ openMatrix?: () => void } | null>(null);

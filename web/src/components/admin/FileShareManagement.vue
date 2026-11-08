@@ -64,6 +64,7 @@ function revertPageSettings() {
 const { confirmDiscardChanges } = useSettingsPageDirty(pageDirty, revertPageSettings);
 
 const { activeTab, setActiveTab } = useSectionTabRoute(WEBDAV_TAB, VALID_TABS, {
+  pageKey: "share",
   beforeTabChange: async (from, to) => {
     if (from === to) return true;
     const leavingDirty =

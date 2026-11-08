@@ -63,6 +63,7 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
   initialTab,
   [SCRAPE_TAB, ENHANCED_TAB, BACKUP_TAB],
   {
+    pageKey: "tools",
     beforeTabChange: async () => {
       if (!settingsDrawerOpen.value) return true;
       const ok = await confirmDiscardChanges(() => scrapePanelDirty.value);

@@ -67,6 +67,11 @@ export function provideAdminPageContext(activePage: Ref<string>) {
   provide(activePageKey, activePage);
 }
 
+// useAdminActivePage 读取后台当前激活页面 key；非后台页面返回 undefined。
+export function useAdminActivePage(): Ref<string> | undefined {
+  return inject(activePageKey);
+}
+
 export function useAdminPageLoading(pageKey: string, source: WatchSource<boolean>) {
   const activePage = inject(activePageKey);
   const id = Symbol(pageKey);

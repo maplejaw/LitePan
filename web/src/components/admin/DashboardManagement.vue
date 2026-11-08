@@ -34,7 +34,7 @@ const tabs = [
   { key: LOGS_TAB, label: "系统日志" },
 ];
 
-const { activeTab, setActiveTab } = useSectionTabRoute(OVERVIEW_TAB, VALID_TABS);
+const { activeTab, setActiveTab } = useSectionTabRoute(OVERVIEW_TAB, VALID_TABS, { pageKey: "dashboard" });
 const logPresetLevel = ref<string | number>("");
 const logPresetSeq = ref(0);
 
