@@ -37,9 +37,6 @@ async function loadScrapeEnabled() {
   }
 }
 
-onMounted(loadScrapeEnabled);
-onActivated(loadScrapeEnabled);
-
 const settingsDrawerOpen = ref(false);
 const enhancedSearchOpen = ref(false);
 const cloudToolsRef = ref<{ clearSearch: () => void } | null>(null);
@@ -77,10 +74,22 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
 );
 
 // 开关关闭时若正停在刮削页，自动切到增强工具，避免留下一个不可见的活动 tab。
-watch(scrapeEnabled, (enabled) => {
-  if (!enabled && activeTab.value === SCRAPE_TAB) {
-    setActiveTab(ENHANCED_TAB);
+// 同时监听 activeTab：从其他页面切回来时 tab 可能没变化，仅靠 scrapeEnabled 的变更不够。
+function ensureVisibleScrapeTab() {
+  if (!scrapeEnabled.value && activeTab.value === SCRAPE_TAB) {
+    void setActiveTab(ENHANCED_TAB);
   }
+}
+
+watch([scrapeEnabled, activeTab], ensureVisibleScrapeTab, { immediate: true });
+
+onMounted(() => {
+  ensureVisibleScrapeTab();
+  void loadScrapeEnabled();
+});
+onActivated(() => {
+  ensureVisibleScrapeTab();
+  void loadScrapeEnabled();
 });
 
 // 重面板首次访问时才挂载，之后只隐藏不销毁，保留已加载状态。
@@ -99,7 +108,7 @@ watch(
 );
 
 const drawerSaving = computed(() => readPanelSaving(scrapeSettingsRef.value?.saving));
-const isScrapeTab = computed(() => activeTab.value === SCRAPE_TAB);
+const isScrapeTab = computed(() => scrapeEnabled.value && activeTab.value === SCRAPE_TAB);
 const isEnhancedTab = computed(() => activeTab.value === ENHANCED_TAB);
 const isBackupTab = computed(() => activeTab.value === BACKUP_TAB);
 
