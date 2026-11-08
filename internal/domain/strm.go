@@ -53,6 +53,7 @@ type StrmTask struct {
 	ExcludeDirKeywords  string
 	ExcludeFileKeywords string
 	SyncMetadata        bool
+	AlignSubtitles      bool
 	BranchCheckEnabled  bool
 	TimeWindowEnabled   bool
 	TimeStart           string

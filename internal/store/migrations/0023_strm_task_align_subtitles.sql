@@ -1,0 +1,1 @@
+ALTER TABLE strm_tasks ADD COLUMN align_subtitles INTEGER NOT NULL DEFAULT 0;

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 
 	"litepan/internal/account"
 	"litepan/internal/accountprofile"
@@ -93,6 +94,28 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 	subtitleAlignSvc := subtitlealign.New(subtitlealign.Options{
 		Settings: st.settings,
 		Log:      logs.For(logx.ModuleSystem),
+	})
+	strmSvc.SetSubtitleAligner(func(ctx context.Context, task *domain.StrmTask) error {
+		if !task.AlignSubtitles || !subtitleAlignSvc.Enabled() {
+			return nil
+		}
+		root := strm.TaskOutputDir(cfg.StrmDir, strm.TaskRelDir(task.GroupDir, task.OutputFolder))
+		if root == "" {
+			return nil
+		}
+		if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
+			return nil
+		}
+		plan, scanErr := subtitleAlignSvc.Scan(ctx, root, subtitlealign.ScanOptions{})
+		if scanErr != nil {
+			return scanErr
+		}
+		for _, action := range plan.Actions {
+			if action.Kind == subtitlealign.KindLink {
+				return subtitleAlignSvc.Apply(ctx, plan)
+			}
+		}
+		return nil
 	})
 	strmSvc.SetOrganizeBusyChecker(mediaOrganizeSvc)
 	strmSvc.SetRetentionBusyChecker(retentionSvc)

@@ -217,7 +217,29 @@ func (s *Service) runTaskAsync(task *domain.StrmTask) {
 				s.notifyScanProtected(task, result.ProtectReason)
 			}
 		}
+		if err == nil && task.AlignSubtitles {
+			s.runSubtitleAlign(ctx, task)
+		}
 	}()
+}
+
+// runSubtitleAlign 在任务成功后同步执行字幕对齐；失败只记日志，不影响任务结果。
+func (s *Service) runSubtitleAlign(ctx context.Context, task *domain.StrmTask) {
+	s.mu.Lock()
+	fn := s.subtitleAligner
+	s.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	if err := fn(ctx, task); err != nil {
+		s.log.Warn("STRM 任务字幕对齐失败",
+			"task_id", task.ID,
+			"task_name", task.Name,
+			"error", err.Error(),
+		)
+		return
+	}
+	s.log.Info("STRM 任务字幕对齐完成", "task_id", task.ID, "task_name", task.Name)
 }
 
 func (s *Service) canStartTaskLocked(task *domain.StrmTask, taskConcurrency int) bool {

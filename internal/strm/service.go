@@ -29,6 +29,16 @@ type RunningAccountLister interface {
 	GetRunningAccountIDs() []int64
 }
 
+// SubtitleAlignFunc 在 STRM 任务成功结束后对输出目录执行字幕多版本对齐。
+type SubtitleAlignFunc func(ctx context.Context, task *domain.StrmTask) error
+
+// SetSubtitleAligner 注入字幕对齐实现；未注入时该功能自动跳过。
+func (s *Service) SetSubtitleAligner(fn SubtitleAlignFunc) {
+	s.mu.Lock()
+	s.subtitleAligner = fn
+	s.mu.Unlock()
+}
+
 type Service struct {
 	repo       domain.StrmTaskRepository
 	branches   domain.StrmBranchRepository
@@ -56,6 +66,7 @@ type Service struct {
 	internalMutationUntil    map[int64]time.Time
 	organizeBusy             RunningAccountLister
 	retentionBusy            RunningAccountLister
+	subtitleAligner          SubtitleAlignFunc
 	automationManagedChecker func(context.Context, int64) (bool, error)
 	appCtx                   context.Context
 	started                  bool
@@ -358,6 +369,7 @@ func (s *Service) UpdateTask(ctx context.Context, id int64, task *domain.StrmTas
 	existing.ExcludeDirKeywords = task.ExcludeDirKeywords
 	existing.ExcludeFileKeywords = task.ExcludeFileKeywords
 	existing.SyncMetadata = task.SyncMetadata
+	existing.AlignSubtitles = task.AlignSubtitles
 	existing.BranchCheckEnabled = task.BranchCheckEnabled
 	existing.TimeWindowEnabled = task.TimeWindowEnabled
 	existing.TimeStart = task.TimeStart

@@ -16,6 +16,7 @@ export interface StrmTask {
   exclude_dir_keywords: string;
   exclude_file_keywords: string;
   sync_metadata: boolean;
+  align_subtitles: boolean;
   branch_check_enabled: boolean;
   time_window_enabled: boolean;
   time_start: string;
@@ -101,6 +102,7 @@ export type StrmTaskInput = Pick<
   | "exclude_dir_keywords"
   | "exclude_file_keywords"
   | "sync_metadata"
+  | "align_subtitles"
   | "branch_check_enabled"
   | "time_window_enabled"
   | "time_start"

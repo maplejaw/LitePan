@@ -243,9 +243,10 @@ const temporaryRetentionOptions = [
   { value: 0, label: "永久" },
 ];
 
-type TaskForm = Omit<StrmTaskInput, "sync_metadata" | "schedule_mode"> & {
+type TaskForm = Omit<StrmTaskInput, "sync_metadata" | "align_subtitles" | "schedule_mode"> & {
   time_window_mode: "always" | "custom";
   sync_metadata: string;
+  align_subtitles: string;
   schedule_mode: ScheduleMode;
 };
 
@@ -264,6 +265,7 @@ const emptyForm = (): TaskForm => ({
   exclude_dir_keywords: "",
   exclude_file_keywords: "",
   sync_metadata: "false",
+  align_subtitles: "false",
   branch_check_enabled: false,
   time_window_enabled: false,
   time_start: "00:00",
@@ -672,6 +674,7 @@ function openEdit(task: StrmTask) {
   form.exclude_dir_keywords = task.exclude_dir_keywords ?? "";
   form.exclude_file_keywords = task.exclude_file_keywords ?? "";
   form.sync_metadata = task.sync_metadata ? "true" : "false";
+  form.align_subtitles = task.align_subtitles ? "true" : "false";
   form.branch_check_enabled = !!task.branch_check_enabled;
   applyTimeWindowFromTask(form, task);
   showAdvanced.value = false;
@@ -702,6 +705,7 @@ function buildTaskPayload(): StrmTaskInput {
     exclude_dir_keywords: form.exclude_dir_keywords.trim(),
     exclude_file_keywords: form.exclude_file_keywords.trim(),
     sync_metadata: form.sync_metadata === "true",
+    align_subtitles: form.align_subtitles === "true",
     branch_check_enabled: form.branch_check_enabled,
     ...timeWindowPayload(form),
     schedule_mode: form.schedule_mode,
@@ -1415,6 +1419,21 @@ watch(activeTab, (tab) => {
               </div>
             </FormField>
           </div>
+
+          <div class="strm-form__row">
+            <FormField label="字幕自动对齐">
+              <AppSelect
+                v-model="form.align_subtitles"
+                :options="metadataSyncOptions"
+                placeholder="请选择是否自动对齐字幕"
+              />
+            </FormField>
+            <FormField label="说明">
+              <span class="strm-form__hint">
+                任务成功后，按目录名把唯一字幕对齐到各版本 .strm；需先开启「同步元数据」。
+              </span>
+            </FormField>
+          </div>
         </template>
 
         <div v-if="strmRepairPhase === 'idle'" class="modal-form__footer">
@@ -1882,6 +1901,14 @@ watch(activeTab, (tab) => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.strm-form__hint {
+  display: block;
+  padding-top: 9px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
 }
 
 .strm-advanced-toggle {
