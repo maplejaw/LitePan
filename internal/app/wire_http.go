@@ -146,6 +146,7 @@ func wireHTTPServer(cfg config.Config, logs *logx.Manager, st *storeBundle, core
 		AIOrganize:        svc.aiOrganize,
 		ClassifyOrganize:  svc.classifyOrganize,
 		StrmScrape:        svc.strmScrape,
+		SubtitleAlign:     svc.subtitleAlign,
 		Automation:        svc.automation,
 		Fuse:              svc.fuse,
 		CrossTransfer:     svc.crossTransfer,

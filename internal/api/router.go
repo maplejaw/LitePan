@@ -50,6 +50,7 @@ import (
 	"litepan/internal/strm"
 	"litepan/internal/strmdelete"
 	"litepan/internal/strmscrape"
+	"litepan/internal/subtitlealign"
 	"litepan/internal/upload"
 )
 
@@ -79,6 +80,7 @@ type Deps struct {
 	AIOrganize        *aiorganize.Service
 	ClassifyOrganize  *classifyorganize.Service
 	StrmScrape        *strmscrape.Service
+	SubtitleAlign     *subtitlealign.Service
 	Automation        *automation.Service
 	Fuse              *fusemount.Service
 	CrossTransfer     *crosstransfer.Service
@@ -122,6 +124,7 @@ type Handler struct {
 	aiOrganize        *aiorganize.Service
 	classifyOrganize  *classifyorganize.Service
 	strmScrape        *strmscrape.Service
+	subtitleAlign     *subtitlealign.Service
 	automation        *automation.Service
 	fuse              *fusemount.Service
 	crossTransfer     *crosstransfer.Service
@@ -174,6 +177,7 @@ func NewRouter(d Deps) http.Handler {
 		aiOrganize:        d.AIOrganize,
 		classifyOrganize:  d.ClassifyOrganize,
 		strmScrape:        d.StrmScrape,
+		subtitleAlign:     d.SubtitleAlign,
 		automation:        d.Automation,
 		fuse:              d.Fuse,
 		crossTransfer:     d.CrossTransfer,
@@ -423,6 +427,17 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/test-tmdb", h.testMediaOrganizeTMDB)
 					r.Get("/search-tmdb", h.searchMediaOrganizeTMDB)
 					r.Post("/tasks/{id}/bindings", h.setMediaOrganizeBinding)
+				})
+				// 设置读写不挂总开关：面板需要读到 enabled 才能正确隐藏自己。
+				r.Route("/tools/subtitle-align", func(r chi.Router) {
+					r.Get("/settings", h.getSubtitleAlignSettings)
+					r.Put("/settings", h.updateSubtitleAlignSettings)
+					r.Group(func(r chi.Router) {
+						r.Use(h.requireSubtitleAlignEnabled)
+						r.Post("/scan", h.scanSubtitleAlign)
+						r.Post("/apply", h.applySubtitleAlign)
+						r.Post("/cleanup", h.cleanupSubtitleAlign)
+					})
 				})
 				r.Route("/strm-scrape", func(r chi.Router) {
 					r.Use(h.requireStrmScrapeEnabled)

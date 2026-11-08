@@ -68,6 +68,10 @@ const (
 	KeyStrmScrapeActors            = "strm_scrape_actors"
 	KeyStrmScrapeClearLogo         = "strm_scrape_clearlogo"
 	KeyStrmScrapeScopes            = "strm_scrape_scopes"
+	KeySubtitleAlignEnabled        = "subtitle_align_enabled"
+	KeySubtitleAlignMode           = "subtitle_align_mode"
+	KeySubtitleAlignFallback       = "subtitle_align_fallback"
+	KeySubtitleAlignSubExts        = "subtitle_align_sub_exts"
 
 	KeyMOProxyEnabled          = "mo_proxy_enabled"
 	KeyMOProxyURL              = "mo_proxy_url"
@@ -224,6 +228,13 @@ func defaultSpecs() []Spec {
 		boolSpec(KeyStrmScrapeActors, "strm", "刮削演员信息", "将主要演员、角色和头像地址写入作品 NFO。", "false"),
 		boolSpec(KeyStrmScrapeClearLogo, "strm", "刮削影片 Logo", "按搜索语言优先生成 clearlogo.png。", "false"),
 		{Key: KeyStrmScrapeScopes, Type: TypeString, Default: "{}", Hidden: true},
+		boolSpec(KeySubtitleAlignEnabled, "strm", "启用字幕多版本对齐", "按目录名把唯一字幕同步成各版本视频的同名字幕；关闭后隐藏「字幕对齐」面板并拒绝相关接口，已生成的别名不会被删除。", "true"),
+		selectSpec(KeySubtitleAlignMode, "strm", "字幕对齐链接方式", "hardlink=硬链接，不占额外空间；copy=复制文件，兼容跨文件系统场景。", "hardlink", []Option{
+			{Value: "hardlink", Label: "硬链接"},
+			{Value: "copy", Label: "复制"},
+		}),
+		boolSpec(KeySubtitleAlignFallback, "strm", "硬链接失败时降级复制", "跨文件系统或不支持硬链接的挂载点自动改为复制，并在结果中标注实际方式。", "true"),
+		stringSpec(KeySubtitleAlignSubExts, "strm", "字幕对齐扩展名", "参与对齐的字幕扩展名，英文逗号或分号分隔。", "srt,ass,ssa,vtt,sub,smi"),
 		// 界面偏好：信息条开合（后台不展示，仅持久化 + 随备份还原）
 		{Key: KeyUIBandHiddenStrm, Type: TypeBool, Default: "false", Hidden: true, SilentLog: true},
 		{Key: KeyUIBandHiddenCache, Type: TypeBool, Default: "false", Hidden: true, SilentLog: true},

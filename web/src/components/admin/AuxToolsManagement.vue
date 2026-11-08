@@ -6,6 +6,7 @@ import SectionTabBar from "@/components/admin/SectionTabBar.vue";
 import AdminSettingsDrawer from "@/components/admin/AdminSettingsDrawer.vue";
 import type StrmScrapePanelComponent from "@/components/admin/StrmScrapePanel.vue";
 import { fetchStrmSettings } from "@/api/strm";
+import { fetchSubtitleAlignSettings } from "@/api/subtitleAlign";
 import { useSectionTabRoute } from "@/composables/useSectionTabRoute";
 import { useSettingsPageDirty } from "@/composables/useSettingsPageDirty";
 import { readPanelSaving, type SettingsPanelExpose } from "@/composables/useSettingsForm";
@@ -13,27 +14,43 @@ import { readPanelSaving, type SettingsPanelExpose } from "@/composables/useSett
 const StrmScrapePanel = defineAsyncComponent(() => import("@/components/admin/StrmScrapePanel.vue"));
 const StrmScrapeSettings = defineAsyncComponent(() => import("@/components/admin/StrmScrapeSettings.vue"));
 const CloudToolsPanel = defineAsyncComponent(() => import("@/components/admin/CloudToolsPanel.vue"));
+const SubtitleAlignPanel = defineAsyncComponent(() => import("@/components/admin/SubtitleAlignPanel.vue"));
 const BackupRestorePanel = defineAsyncComponent(() => import("@/components/admin/BackupRestorePanel.vue"));
 
 const SCRAPE_TAB = "scrape";
 const PROXY_TAB = "proxy";
 const ENHANCED_TAB = "enhanced";
+const ALIGN_TAB = "align";
 const BACKUP_TAB = "backup";
 const tabs = [
   { key: SCRAPE_TAB, label: "STRM 刮削" },
   { key: ENHANCED_TAB, label: "增强工具" },
+  { key: ALIGN_TAB, label: "字幕对齐" },
   { key: BACKUP_TAB, label: "备份管理" },
 ];
 
 const scrapeEnabled = ref(true);
-const visibleTabs = computed(() => tabs.filter((tab) => tab.key !== SCRAPE_TAB || scrapeEnabled.value));
+const alignEnabled = ref(true);
+const visibleTabs = computed(() =>
+  tabs.filter(
+    (tab) =>
+      (tab.key !== SCRAPE_TAB || scrapeEnabled.value) &&
+      (tab.key !== ALIGN_TAB || alignEnabled.value),
+  ),
+);
 
-async function loadScrapeEnabled() {
+async function loadFeatureFlags() {
   try {
     const data = await fetchStrmSettings();
     scrapeEnabled.value = data.scrape_enabled !== false;
   } catch {
     // 接口异常时保持可见，避免误隐藏功能
+  }
+  try {
+    const data = await fetchSubtitleAlignSettings();
+    alignEnabled.value = data.enabled !== false;
+  } catch {
+    // 同上
   }
 }
 
@@ -61,7 +78,7 @@ const route = useRoute();
 const initialTab = String(route.query.tab ?? "") === PROXY_TAB ? ENHANCED_TAB : SCRAPE_TAB;
 const { activeTab, setActiveTab } = useSectionTabRoute(
   initialTab,
-  [SCRAPE_TAB, ENHANCED_TAB, BACKUP_TAB],
+  [SCRAPE_TAB, ENHANCED_TAB, ALIGN_TAB, BACKUP_TAB],
   {
     pageKey: "tools",
     beforeTabChange: async () => {
@@ -74,23 +91,25 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
   },
 );
 
-// 开关关闭时若正停在刮削页，自动切到增强工具，避免留下一个不可见的活动 tab。
-// 同时监听 activeTab：从其他页面切回来时 tab 可能没变化，仅靠 scrapeEnabled 的变更不够。
-function ensureVisibleScrapeTab() {
+// 开关关闭时若正停在被隐藏的页，自动切到增强工具，避免留下一个不可见的活动 tab。
+// 同时监听 activeTab：从其他页面切回来时 tab 可能没变化，仅靠开关变更不够。
+function ensureVisibleTab() {
   if (!scrapeEnabled.value && activeTab.value === SCRAPE_TAB) {
+    void setActiveTab(ENHANCED_TAB);
+  } else if (!alignEnabled.value && activeTab.value === ALIGN_TAB) {
     void setActiveTab(ENHANCED_TAB);
   }
 }
 
-watch([scrapeEnabled, activeTab], ensureVisibleScrapeTab, { immediate: true });
+watch([scrapeEnabled, alignEnabled, activeTab], ensureVisibleTab, { immediate: true });
 
 onMounted(() => {
-  ensureVisibleScrapeTab();
-  void loadScrapeEnabled();
+  ensureVisibleTab();
+  void loadFeatureFlags();
 });
 onActivated(() => {
-  ensureVisibleScrapeTab();
-  void loadScrapeEnabled();
+  ensureVisibleTab();
+  void loadFeatureFlags();
 });
 
 // 重面板首次访问时才挂载，之后只隐藏不销毁，保留已加载状态。
@@ -111,6 +130,7 @@ watch(
 const drawerSaving = computed(() => readPanelSaving(scrapeSettingsRef.value?.saving));
 const isScrapeTab = computed(() => scrapeEnabled.value && activeTab.value === SCRAPE_TAB);
 const isEnhancedTab = computed(() => activeTab.value === ENHANCED_TAB);
+const isAlignTab = computed(() => alignEnabled.value && activeTab.value === ALIGN_TAB);
 const isBackupTab = computed(() => activeTab.value === BACKUP_TAB);
 
 async function openScrapeSettings() {
@@ -176,6 +196,7 @@ async function handleDrawerSave() {
       :search-open="enhancedSearchOpen"
       @update:search-open="enhancedSearchOpen = $event"
     />
+    <SubtitleAlignPanel v-if="alignEnabled && tabsVisited[ALIGN_TAB]" v-show="isAlignTab" />
     <BackupRestorePanel v-if="tabsVisited[BACKUP_TAB]" v-show="isBackupTab" />
 
     <AdminSettingsDrawer

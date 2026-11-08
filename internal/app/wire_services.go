@@ -28,6 +28,7 @@ import (
 	"litepan/internal/strm"
 	"litepan/internal/strmdelete"
 	"litepan/internal/strmscrape"
+	"litepan/internal/subtitlealign"
 	"litepan/internal/upload"
 )
 
@@ -45,6 +46,7 @@ type servicesBundle struct {
 	aiOrganize       *aiorganize.Service
 	classifyOrganize *classifyorganize.Service
 	strmScrape       *strmscrape.Service
+	subtitleAlign    *subtitlealign.Service
 	automation       *automation.Service
 	fuse             *fusemount.Service
 	fuseReadCache    *fusereadcache.Service
@@ -86,6 +88,10 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		Bus:      core.bus,
 		DataDir:  cfg.DataDir,
 		StrmDir:  cfg.StrmDir,
+		Log:      logs.For(logx.ModuleSystem),
+	})
+	subtitleAlignSvc := subtitlealign.New(subtitlealign.Options{
+		Settings: st.settings,
 		Log:      logs.For(logx.ModuleSystem),
 	})
 	strmSvc.SetOrganizeBusyChecker(mediaOrganizeSvc)
@@ -231,6 +237,7 @@ func wireServices(cfg config.Config, logs *logx.Manager, st *storeBundle, core *
 		aiOrganize:       aiOrganizeSvc,
 		classifyOrganize: classifyOrganizeSvc,
 		strmScrape:       strmScrapeSvc,
+		subtitleAlign:    subtitleAlignSvc,
 		automation:       automationSvc,
 		fuse:             fuseSvc,
 		fuseReadCache:    fuseReadCache,
