@@ -82,6 +82,7 @@ export interface StrmSettings {
   metadata_max_size_mb: number;
   metadata_parent_enabled: boolean;
   metadata_sync_mode: "cloud_primary" | "local_primary" | "bidirectional";
+  scrape_enabled: boolean;
 }
 
 export type StrmTaskInput = Pick<
@@ -278,6 +279,7 @@ export function saveStrmSettings(body: Partial<Record<keyof StrmSettings, string
     ["metadata_max_size_mb", (v) => String(v)],
     ["metadata_parent_enabled", (v) => (v ? "true" : "false")],
     ["metadata_sync_mode", (v) => String(v)],
+    ["scrape_enabled", (v) => (v ? "true" : "false")],
   ];
   for (const [key, fmt] of map) {
     if (body[key] !== undefined) payload[key] = fmt(body[key]);

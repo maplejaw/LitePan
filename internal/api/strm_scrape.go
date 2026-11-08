@@ -29,6 +29,17 @@ func parseInt(raw string) int {
 	return v
 }
 
+// requireStrmScrapeEnabled 在总开关关闭时拒绝整组刮削接口，避免旧页面/脚本继续触发。
+func (h *Handler) requireStrmScrapeEnabled(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.strmScrape == nil || !h.strmScrape.Enabled() {
+			writeErr(w, domain.Errorf(domain.CodeValidation, "STRM 刮削功能已关闭"))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // strmTaskIDQuery 统一解析并校验 strm_task_id 参数。
 func strmTaskIDQuery(r *http.Request) (int64, error) {
 	taskID, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("strm_task_id")), 10, 64)

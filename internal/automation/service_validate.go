@@ -43,6 +43,10 @@ func (s *Service) ValidateRule(ctx context.Context, actions []RuleAction) (Valid
 			}
 			strmActions = append(strmActions, indexedRuleAction{Index: index, Action: action})
 		case domain.AutomationActionStrmScrape:
+			if s.strmScrape != nil && !s.strmScrape.Enabled() {
+				issues = append(issues, ValidationIssue{Level: "error", Message: "STRM 刮削功能已关闭", ActionIndex: index, ActionType: action.Type})
+				continue
+			}
 			taskID := int64(anyInt(action.Params["task_id"]))
 			if taskID <= 0 {
 				issues = append(issues, ValidationIssue{Level: "error", Message: "未选择 STRM 任务", ActionIndex: index, ActionType: action.Type})

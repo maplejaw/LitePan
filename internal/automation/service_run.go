@@ -370,6 +370,9 @@ func (s *Service) runStrmScrape(ctx context.Context, params map[string]any) map[
 	if s.strmScrape == nil {
 		return map[string]any{"status": "failed", "success": false, "message": "STRM 刮削服务未就绪"}
 	}
+	if !s.strmScrape.Enabled() {
+		return map[string]any{"status": "failed", "success": false, "message": "STRM 刮削功能已关闭"}
+	}
 	taskID := int64(anyInt(params["task_id"]))
 	if taskID <= 0 {
 		return map[string]any{"status": "failed", "success": false, "message": "未选择 STRM 任务"}

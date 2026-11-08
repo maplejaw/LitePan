@@ -71,6 +71,14 @@ func (s *Service) GetProgress() Progress {
 	return s.progress
 }
 
+// Enabled 返回 STRM 刮削总开关；未注入设置服务时默认开启，保持既有测试行为。
+func (s *Service) Enabled() bool {
+	if s == nil || s.settings == nil {
+		return true
+	}
+	return s.settings.Bool(settings.KeyStrmScrapeEnabled)
+}
+
 func (s *Service) Stop() {
 	s.mu.Lock()
 	cancel := s.cancel
@@ -156,6 +164,9 @@ func (s *Service) RunAsync(ctx context.Context, req RunRequest) error {
 }
 
 func (s *Service) startAsyncOperation(taskID int64, total int, message, doneMessage, logMessage string, run func(context.Context) error) error {
+	if !s.Enabled() {
+		return domain.Errorf(domain.CodeValidation, "STRM 刮削功能已关闭")
+	}
 	if !s.operationMu.TryLock() {
 		return domain.Errorf(domain.CodeValidation, "刮削任务进行中")
 	}
@@ -219,6 +230,9 @@ func (s *Service) overwriteForMatch(sameID bool) bool {
 
 // Rematch 对同 ID 沿用写入策略，换 ID 时强制覆盖并统一走 writeMatchedOpts。
 func (s *Service) Rematch(ctx context.Context, req RematchRequest) (*Item, bool, error) {
+	if !s.Enabled() {
+		return nil, false, domain.Errorf(domain.CodeValidation, "STRM 刮削功能已关闭")
+	}
 	if req.StrmTaskID <= 0 || strings.TrimSpace(req.ItemID) == "" || strings.TrimSpace(req.TMDBID) == "" {
 		return nil, false, domain.Errorf(domain.CodeValidation, "参数不完整")
 	}
@@ -313,6 +327,9 @@ func confirmExistingMatch(g workGroup, mediaType string) {
 }
 
 func (s *Service) MarkNormal(ctx context.Context, req MarkNormalRequest) (*Item, error) {
+	if !s.Enabled() {
+		return nil, domain.Errorf(domain.CodeValidation, "STRM 刮削功能已关闭")
+	}
 	if req.StrmTaskID <= 0 || strings.TrimSpace(req.ItemID) == "" {
 		return nil, domain.Errorf(domain.CodeValidation, "参数不完整")
 	}
@@ -362,6 +379,9 @@ func (s *Service) MarkNormal(ctx context.Context, req MarkNormalRequest) (*Item,
 
 // Rescrape 沿用原 TMDB ID，走与「开始刮削」相同的 writeMatchedOpts。
 func (s *Service) Rescrape(ctx context.Context, req RescrapeRequest) (*Item, bool, error) {
+	if !s.Enabled() {
+		return nil, false, domain.Errorf(domain.CodeValidation, "STRM 刮削功能已关闭")
+	}
 	if req.StrmTaskID <= 0 || strings.TrimSpace(req.ItemID) == "" {
 		return nil, false, domain.Errorf(domain.CodeValidation, "参数不完整")
 	}

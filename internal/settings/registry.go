@@ -62,6 +62,7 @@ const (
 	KeyQuarkTVClientListMode       = "quark_tv_client_list_mode"
 	KeyQuarkTVProxyClients         = "quark_tv_proxy_clients"
 	KeyStrmScrapeWriteMode         = "strm_scrape_write_mode"
+	KeyStrmScrapeEnabled           = "strm_scrape_enabled"
 	KeyStrmScrapeEpisodeInfo       = "strm_scrape_episode_info"
 	KeyStrmScrapeFanart            = "strm_scrape_fanart"
 	KeyStrmScrapeActors            = "strm_scrape_actors"
@@ -217,6 +218,7 @@ func defaultSpecs() []Spec {
 			{Value: "bidirectional", Label: "本地与云端互补"},
 		}),
 		stringSpec(KeyStrmScrapeWriteMode, "strm", "STRM 刮削写入策略", "missing_only=仅补缺；overwrite=覆盖已有 nfo/海报。", "missing_only"),
+		boolSpec(KeyStrmScrapeEnabled, "strm", "启用 STRM 刮削", "关闭后隐藏「STRM 刮削」面板，并禁止手动和自动联动触发刮削；已生成的 NFO/海报不会被删除。", "true"),
 		boolSpec(KeyStrmScrapeEpisodeInfo, "strm", "刮削分集信息", "生成季/集 NFO、季海报和分集预览图。", "true"),
 		boolSpec(KeyStrmScrapeFanart, "strm", "刮削详情页背景图", "为电影和剧集生成 fanart.jpg。", "false"),
 		boolSpec(KeyStrmScrapeActors, "strm", "刮削演员信息", "将主要演员、角色和头像地址写入作品 NFO。", "false"),

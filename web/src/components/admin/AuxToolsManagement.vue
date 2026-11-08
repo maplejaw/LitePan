@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onDeactivated, reactive, ref, watch, watchEffect } from "vue";
+import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, onMounted, reactive, ref, watch, watchEffect } from "vue";
 import { useRoute } from "vue-router";
 import AppButton from "@/components/base/AppButton.vue";
 import SectionTabBar from "@/components/admin/SectionTabBar.vue";
 import AdminSettingsDrawer from "@/components/admin/AdminSettingsDrawer.vue";
 import type StrmScrapePanelComponent from "@/components/admin/StrmScrapePanel.vue";
+import { fetchStrmSettings } from "@/api/strm";
 import { useSectionTabRoute } from "@/composables/useSectionTabRoute";
 import { useSettingsPageDirty } from "@/composables/useSettingsPageDirty";
 import { readPanelSaving, type SettingsPanelExpose } from "@/composables/useSettingsForm";
@@ -23,6 +24,21 @@ const tabs = [
   { key: ENHANCED_TAB, label: "增强工具" },
   { key: BACKUP_TAB, label: "备份管理" },
 ];
+
+const scrapeEnabled = ref(true);
+const visibleTabs = computed(() => tabs.filter((tab) => tab.key !== SCRAPE_TAB || scrapeEnabled.value));
+
+async function loadScrapeEnabled() {
+  try {
+    const data = await fetchStrmSettings();
+    scrapeEnabled.value = data.scrape_enabled !== false;
+  } catch {
+    // 接口异常时保持可见，避免误隐藏功能
+  }
+}
+
+onMounted(loadScrapeEnabled);
+onActivated(loadScrapeEnabled);
 
 const settingsDrawerOpen = ref(false);
 const enhancedSearchOpen = ref(false);
@@ -59,6 +75,13 @@ const { activeTab, setActiveTab } = useSectionTabRoute(
     },
   },
 );
+
+// 开关关闭时若正停在刮削页，自动切到增强工具，避免留下一个不可见的活动 tab。
+watch(scrapeEnabled, (enabled) => {
+  if (!enabled && activeTab.value === SCRAPE_TAB) {
+    setActiveTab(ENHANCED_TAB);
+  }
+});
 
 // 重面板首次访问时才挂载，之后只隐藏不销毁，保留已加载状态。
 // 但增强工具的搜索筛选不能跟着留下来：离开这个标签页就清掉，回来看到的是全部卡片。
@@ -109,7 +132,7 @@ async function handleDrawerSave() {
 
 <template>
   <div class="settings">
-    <SectionTabBar :model-value="activeTab" :tabs="tabs" @update:model-value="setActiveTab">
+    <SectionTabBar :model-value="activeTab" :tabs="visibleTabs" @update:model-value="setActiveTab">
       <template #actions>
         <template v-if="isScrapeTab">
           <AppButton
@@ -131,7 +154,7 @@ async function handleDrawerSave() {
     </SectionTabBar>
 
     <StrmScrapePanel
-      v-if="tabsVisited[SCRAPE_TAB]"
+      v-if="scrapeEnabled && tabsVisited[SCRAPE_TAB]"
       v-show="isScrapeTab"
       ref="scrapePanelRef"
       @open-settings="openScrapeSettings"

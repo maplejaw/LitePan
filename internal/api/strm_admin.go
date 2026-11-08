@@ -372,6 +372,10 @@ func (h *Handler) updateStrmSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	// 关闭刮削开关时立即停止正在运行的任务，不等下一轮检查。
+	if h.strmScrape != nil && !h.strmScrape.Enabled() {
+		h.strmScrape.Stop()
+	}
 	h.getStrmSettings(w, r)
 }
 
@@ -578,6 +582,7 @@ func mapStrmSettingAliases(in map[string]string) {
 		"metadata_max_size_mb":    settings.KeyStrmMetadataMaxSizeMB,
 		"metadata_parent_enabled": settings.KeyStrmMetadataParentEnabled,
 		"metadata_sync_mode":      settings.KeyStrmMetadataSyncMode,
+		"scrape_enabled":          settings.KeyStrmScrapeEnabled,
 	}
 	for k, v := range aliases {
 		if raw, ok := in[k]; ok {

@@ -44,6 +44,7 @@ type StrmSettingsForm = Pick<
   | "metadata_max_size_mb"
   | "metadata_parent_enabled"
   | "metadata_sync_mode"
+  | "scrape_enabled"
 >;
 
 const { loading, loaded, runLoad } = useSettingsLoad(false);
@@ -78,6 +79,7 @@ const {
     metadata_max_size_mb: 10,
     metadata_parent_enabled: true,
     metadata_sync_mode: "local_primary",
+    scrape_enabled: true,
   },
   {
     compareField: (key, cur, orig) => {
@@ -123,6 +125,7 @@ function applySettings(data: Awaited<ReturnType<typeof fetchStrmSettings>>) {
     metadata_max_size_mb: parseSettingNumber(data.metadata_max_size_mb) || 10,
     metadata_parent_enabled: !!data.metadata_parent_enabled,
     metadata_sync_mode: data.metadata_sync_mode || "local_primary",
+    scrape_enabled: data.scrape_enabled !== false,
   });
 }
 
@@ -161,6 +164,7 @@ async function saveSettings() {
       metadata_max_size_mb: settings.metadata_max_size_mb,
       metadata_parent_enabled: settings.metadata_parent_enabled,
       metadata_sync_mode: settings.metadata_sync_mode,
+      scrape_enabled: settings.scrape_enabled,
     });
     applySettings(data);
   }, { successMessage: "STRM 设置已保存", errorMessage: "保存设置失败" });
@@ -221,6 +225,23 @@ defineExpose(
     <div v-if="loading" class="settings-card__loading">加载中…</div>
 
     <template v-else>
+      <SettingsCard title="功能开关" :accent="STRM_SETTINGS_ACCENT">
+        <SettingsRow :show-changed-badge="true" :changed="isSettingChanged('scrape_enabled')">
+          <template #info>
+            <div class="settings-row__label">
+              <span>启用 STRM 刮削</span>
+              <SettingsHelpTooltip title="STRM 刮削开关说明">
+                <p>关闭后隐藏「辅助工具 → STRM 刮削」页面，并禁止手动和自动联动触发刮削。</p>
+                <p>已生成的 NFO / 海报不会被删除；需要时重新打开即可。</p>
+              </SettingsHelpTooltip>
+            </div>
+          </template>
+          <template #control>
+            <SettingsBoolSegment v-model="settings.scrape_enabled" label="启用 STRM 刮削" />
+          </template>
+        </SettingsRow>
+      </SettingsCard>
+
       <SettingsCard title="播放与调度" :accent="STRM_SETTINGS_ACCENT">
         <SettingsRow :show-changed-badge="true" :changed="isSettingChanged('base_url')">
           <template #info>

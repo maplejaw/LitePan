@@ -515,6 +515,7 @@ func (s *Service) GetRuntimeSettings(ctx context.Context, requestBase string) (m
 		"metadata_max_size_mb":    s.settings.Int(settings.KeyStrmMetadataMaxSizeMB),
 		"metadata_parent_enabled": s.settings.Bool(settings.KeyStrmMetadataParentEnabled),
 		"metadata_sync_mode":      normalizeMetadataSyncMode(s.settings.String(settings.KeyStrmMetadataSyncMode)),
+		"scrape_enabled":          s.settings.Bool(settings.KeyStrmScrapeEnabled),
 	}, nil
 }
 

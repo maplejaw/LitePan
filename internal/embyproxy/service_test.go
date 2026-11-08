@@ -471,7 +471,7 @@ func TestIsExpectedClientDisconnect(t *testing.T) {
 	}
 }
 
-const testExternalSTRMURL = "http://192.168.50.8:8024/smartstrm_fid/xunlei/VP5jEX3Xz8EQxoUcOCGf8Gm6A1/%E7%95%AA%E5%89%A7/489155.com@MIDV-400-UC.mp4?sign=_I7Xy7xiWxXH4BsLOhf9DqCmkyvlns2X3x0V9vPFpw4="
+const testExternalSTRMURL = "http://192.168.50.8:8024/smartstrm_fid/xunlei/test_smartstrm.mp4?sign=xxxxx"
 
 func externalSTRMItemServer(t *testing.T, externalURL string) *httptest.Server {
 	t.Helper()
@@ -610,7 +610,7 @@ func TestModifyPlaybackInfoExternalSTRM(t *testing.T) {
 	if !strings.Contains(directURL, "/Videos/2257/stream") || !strings.Contains(directURL, "MediaSourceId=mediasource_2257") {
 		t.Fatalf("DirectStreamUrl=%q", directURL)
 	}
-	if mediaSource["Name"] != "489155.com@MIDV-400-UC.mp4" || mediaSource["Container"] != "mp4" {
+	if mediaSource["Name"] != "test_smartstrm.mp4" || mediaSource["Container"] != "mp4" {
 		t.Fatalf("外部元数据未补齐: %#v", mediaSource)
 	}
 	if _, ok := mediaSource["TranscodingUrl"]; ok {
